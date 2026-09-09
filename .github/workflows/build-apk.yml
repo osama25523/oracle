@@ -26,37 +26,56 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential git python3 pkg-config zip unzip
+
           yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platform-tools" "platforms;android-37.0" "build-tools;37.0.0" "ndk;23.2.8568313"
+
+          sdkmanager \
+            "platform-tools" \
+            "platforms;android-37.0" \
+            "build-tools;37.0.0" \
+            "ndk;23.2.8568313"
+
           echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/23.2.8568313" >> "$GITHUB_ENV"
           echo "$ANDROID_SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
 
       - name: Clone ScummVM
-        run: git clone --depth 1 https://github.com/scummvm/scummvm.git scummvm-src
+        shell: bash
+        run: |
+          git clone --depth 1 https://github.com/scummvm/scummvm.git scummvm-src
 
       - name: Add Oracle of Runes Director detection
-        run: python3 patch_scummvm.py scummvm-src
+        shell: bash
+        run: |
+          python3 patch_scummvm.py scummvm-src
+
+      - name: Clone Oboe
+        shell: bash
+        run: |
+          git clone --depth 1 https://github.com/google/oboe.git oboe
+          echo "OBOE_DIR=$GITHUB_WORKSPACE/oboe" >> "$GITHUB_ENV"
 
       - name: Configure ScummVM for Android arm64 with Director only
         working-directory: scummvm-src
         shell: bash
         run: |
           export ANDROID_NDK_ROOT="$ANDROID_SDK_ROOT/ndk/23.2.8568313"
+          export CXXFLAGS="-I$GITHUB_WORKSPACE/oboe/include"
+
           ./configure \
             --host=android-arm64-v8a \
             --disable-all-engines \
             --enable-engine=director \
             --disable-debug
-      - name: Clone Oboe
-        run: |
-          git clone --depth 1 https://github.com/google/oboe.git oboe
-          echo "OBOE_DIR=$GITHUB_WORKSPACE/oboe" >> $GITHUB_ENV
+
       - name: Build native ScummVM and generate Android project
         working-directory: scummvm-src
         shell: bash
         run: |
           export ANDROID_NDK_ROOT="$ANDROID_SDK_ROOT/ndk/23.2.8568313"
+          export CXXFLAGS="-I$GITHUB_WORKSPACE/oboe/include"
+
           make -j2
+
           test -d android_project
           test -f android_project/src.properties
           test -d android_project/mainAssets
@@ -66,9 +85,7 @@ jobs:
         run: |
           mkdir -p scummvm-src/android_project/oracle-runes-game
           cp game_data/* scummvm-src/android_project/oracle-runes-game/
-          # Also place a copy in APK assets. This preserves the original game data
-          # inside the generated package; ScummVM's launcher can still be used if
-          # the current Android backend does not expose custom assets as a game path.
+
           mkdir -p scummvm-src/android_project/mainAssets/src/main/assets/oracle-runes-game
           cp game_data/* scummvm-src/android_project/mainAssets/src/main/assets/oracle-runes-game/
 
@@ -84,10 +101,21 @@ jobs:
         shell: bash
         run: |
           mkdir -p output
-          find scummvm-src/android_project -type f -name '*.apk' -print -exec cp {} output/Oracle-of-Runes-debug.apk \; -quit
+
+          APK_PATH="$(find scummvm-src/android_project -type f -name '*.apk' | head -n 1)"
+
+          echo "APK found at: $APK_PATH"
+
+          test -n "$APK_PATH"
+          test -f "$APK_PATH"
+
+          cp "$APK_PATH" output/Oracle-of-Runes-debug.apk
           cp -r game_data output/oracle-runes-game
-          test -f output/Oracle-of-Runes-debug.apk
-          cd output && zip -r Oracle-of-Runes-Android-Package.zip Oracle-of-Runes-debug.apk oracle-runes-game
+
+          cd output
+          zip -r Oracle-of-Runes-Android-Package.zip \
+            Oracle-of-Runes-debug.apk \
+            oracle-runes-game
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
