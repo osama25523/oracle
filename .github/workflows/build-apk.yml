@@ -1,0 +1,94 @@
+name: Build Oracle of Runes Android APK
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout builder
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install build packages and Android components
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential git python3 pkg-config zip unzip
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-37" "build-tools;37.0.0" "ndk;23.2.8568313"
+          echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/23.2.8568313" >> "$GITHUB_ENV"
+          echo "$ANDROID_SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
+
+      - name: Clone ScummVM
+        run: git clone --depth 1 https://github.com/scummvm/scummvm.git scummvm-src
+
+      - name: Add Oracle of Runes Director detection
+        run: python3 patch_scummvm.py scummvm-src
+
+      - name: Configure ScummVM for Android arm64 with Director only
+        working-directory: scummvm-src
+        shell: bash
+        run: |
+          export ANDROID_NDK_ROOT="$ANDROID_SDK_ROOT/ndk/23.2.8568313"
+          ./configure \
+            --host=android-arm64-v8a \
+            --disable-all-engines \
+            --enable-engine=director \
+            --disable-debug
+
+      - name: Build native ScummVM and generate Android project
+        working-directory: scummvm-src
+        shell: bash
+        run: |
+          export ANDROID_NDK_ROOT="$ANDROID_SDK_ROOT/ndk/23.2.8568313"
+          make -j2
+          test -d android_project
+          test -f android_project/src.properties
+          test -d android_project/mainAssets
+
+      - name: Bundle Oracle of Runes game files with build artifact
+        shell: bash
+        run: |
+          mkdir -p scummvm-src/android_project/oracle-runes-game
+          cp game_data/* scummvm-src/android_project/oracle-runes-game/
+          # Also place a copy in APK assets. This preserves the original game data
+          # inside the generated package; ScummVM's launcher can still be used if
+          # the current Android backend does not expose custom assets as a game path.
+          mkdir -p scummvm-src/android_project/mainAssets/src/main/assets/oracle-runes-game
+          cp game_data/* scummvm-src/android_project/mainAssets/src/main/assets/oracle-runes-game/
+
+      - name: Build APK
+        working-directory: scummvm-src/android_project
+        shell: bash
+        run: |
+          printf 'sdk.dir=%s\n' "$ANDROID_SDK_ROOT" > local.properties
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleDebug
+
+      - name: Collect output
+        shell: bash
+        run: |
+          mkdir -p output
+          find scummvm-src/android_project -type f -name '*.apk' -print -exec cp {} output/Oracle-of-Runes-debug.apk \; -quit
+          cp -r game_data output/oracle-runes-game
+          test -f output/Oracle-of-Runes-debug.apk
+          cd output && zip -r Oracle-of-Runes-Android-Package.zip Oracle-of-Runes-debug.apk oracle-runes-game
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Oracle-of-Runes-Android
+          path: output/Oracle-of-Runes-Android-Package.zip
+          if-no-files-found: error
