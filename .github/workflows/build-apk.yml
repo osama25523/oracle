@@ -47,7 +47,10 @@ jobs:
             --disable-all-engines \
             --enable-engine=director \
             --disable-debug
-
+      - name: Clone Oboe
+        run: |
+          git clone --depth 1 https://github.com/google/oboe.git oboe
+          echo "OBOE_DIR=$GITHUB_WORKSPACE/oboe" >> $GITHUB_ENV
       - name: Build native ScummVM and generate Android project
         working-directory: scummvm-src
         shell: bash
