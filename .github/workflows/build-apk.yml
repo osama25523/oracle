@@ -59,18 +59,18 @@ jobs:
       - name: Verify Oracle of Runes source patch
         shell: bash
         run: |
-          echo "Checking Oracle of Runes entry..."
+          echo "Checking Oracle of Runes patch..."
 
           grep -n "Oracle of Runes" \
-            scummvm-src/engines/director/detection_tables.h || true
+            scummvm-src/engines/director/detection_tables.h
 
-          grep -n "ORACLE_OF_RUNES_CUSTOM_ENTRY" \
-            scummvm-src/engines/director/detection_tables.h || true
+          grep -n "ORACLE_OF_RUNES_DETECTION" \
+            scummvm-src/engines/director/detection_tables.h
 
-          grep -n "ORACLE_OF_RUNES_FILENAME_FALLBACK" \
-            scummvm-src/engines/director/detection.cpp || true
+          grep -n "runes7.dxr" \
+            scummvm-src/engines/director/detection_tables.h
 
-          echo "Verification finished."
+          echo "Verification completed."
 
       - name: Clone Oboe
         shell: bash
@@ -96,9 +96,6 @@ jobs:
 
           cmake --build oboe-build -j2
 
-          echo "Searching for liboboe.a..."
-          find oboe-build -name "liboboe.a" -print
-
           OBOE_LIB="$(find oboe-build -name "liboboe.a" | head -n 1)"
 
           if [ -z "$OBOE_LIB" ]; then
@@ -111,16 +108,6 @@ jobs:
           echo "OBOE_LIB=$GITHUB_WORKSPACE/$OBOE_LIB" >> "$GITHUB_ENV"
           echo "OBOE_LIB_DIR=$GITHUB_WORKSPACE/$OBOE_LIB_DIR" >> "$GITHUB_ENV"
           echo "OBOE_INCLUDE_DIR=$GITHUB_WORKSPACE/oboe/include" >> "$GITHUB_ENV"
-
-      - name: Show Oboe paths
-        shell: bash
-        run: |
-          echo "OBOE_LIB=$OBOE_LIB"
-          echo "OBOE_LIB_DIR=$OBOE_LIB_DIR"
-          echo "OBOE_INCLUDE_DIR=$OBOE_INCLUDE_DIR"
-
-          test -f "$OBOE_LIB"
-          test -d "$OBOE_INCLUDE_DIR"
 
       - name: Configure ScummVM for Android arm64 with Director only
         working-directory: scummvm-src
@@ -150,6 +137,7 @@ jobs:
 
           make -j2
 
+          echo "Checking Android project..."
           test -d android_project
           test -f android_project/src.properties
           test -d android_project/mainAssets
@@ -168,7 +156,7 @@ jobs:
           cp game_data/* \
             scummvm-src/android_project/mainAssets/src/main/assets/oracle-runes-game/
 
-          echo "Game files bundled:"
+          echo "Bundled files:"
           ls -lah scummvm-src/android_project/oracle-runes-game
 
       - name: Build APK
@@ -201,7 +189,7 @@ jobs:
           )"
 
           if [ -z "$APK_PATH" ]; then
-            echo "ERROR: No APK file was generated."
+            echo "ERROR: No APK generated"
             exit 1
           fi
 
