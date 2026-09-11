@@ -1,4 +1,5 @@
 import sys
+import re
 from pathlib import Path
 
 if len(sys.argv) != 2:
@@ -16,36 +17,33 @@ for p in (builtins_cpp, builtins_h, activity):
         raise FileNotFoundError(str(p))
 
 # ============================================================
-# A) Oracle fallback builtins: xtnd() and xtra()
+# A) Director/Lingo compatibility for Oracle of Runes
 # ============================================================
 
 cpp = builtins_cpp.read_text(encoding="utf-8")
 
 if "ORACLE_RUNES_SAFE_XTRA" not in cpp:
-    old_reg = '{ "xtra", LB::b_xtra, 1, 1, 500, FBLTIN }'
-    new_reg = '{ "xtra", LB::b_orunesXtra, 1, 1, 500, FBLTIN }'
-
-    if old_reg not in cpp:
+    # Match the upstream xtra registration regardless of tabs/alignment.
+    xtra_pattern = re.compile(
+        r'(?m)^(?P<indent>\s*)\{\s*"xtra"\s*,\s*LB::b_xtra\s*,\s*1\s*,\s*1\s*,\s*500\s*,\s*FBLTIN\s*\}\s*,\s*(?://[^\n]*)?$'
+    )
+    match = xtra_pattern.search(cpp)
+    if not match:
         raise RuntimeError("Could not find current ScummVM xtra builtin registration")
 
-    cpp = cpp.replace(old_reg, new_reg, 1)
-
-    reg_end = cpp.find("\n", cpp.find(new_reg))
-    if reg_end == -1:
-        raise RuntimeError("Could not locate xtra registration line end")
-
-    cpp = (
-        cpp[:reg_end + 1]
-        + '\t{ "xtnd", LB::b_orunesXtnd, -1, 0, 200, FBLTIN }, // ORACLE_RUNES_SAFE_XTND\n'
-        + cpp[reg_end + 1:]
+    indent = match.group("indent")
+    replacement = (
+        f'{indent}{{ "xtra", LB::b_orunesXtra, 1, 1, 500, FBLTIN }}, // ORACLE_RUNES_SAFE_XTRA\n'
+        f'{indent}{{ "xtnd", LB::b_orunesXtnd, -1, 0, 200, FBLTIN }}, // ORACLE_RUNES_SAFE_XTND'
     )
+    cpp = cpp[:match.start()] + "".join(replacement) + cpp[match.end():]
 
     impl_anchor = "void LB::b_xtra(int nargs) {"
     impl_pos = cpp.find(impl_anchor)
     if impl_pos == -1:
         raise RuntimeError("Could not locate LB::b_xtra implementation")
 
-    helper = r'''
+    helpers = r'''
 // ORACLE_RUNES_SAFE_XTRA
 void LB::b_orunesXtra(int nargs) {
 	if (nargs > 0)
@@ -65,7 +63,7 @@ void LB::b_orunesXtnd(int nargs) {
 }
 
 '''
-    cpp = cpp[:impl_pos] + helper + cpp[impl_pos:]
+    cpp = cpp[:impl_pos] + helpers + cpp[impl_pos:]
     builtins_cpp.write_text(cpp, encoding="utf-8")
     print("Applied Oracle xtra/xtnd compatibility patch.")
 else:
@@ -77,12 +75,11 @@ if "void b_orunesXtra(int nargs);" not in hdr:
     if anchor not in hdr:
         raise RuntimeError("Could not find b_xtra declaration in lingo-builtins.h")
 
-    replacement = (
-        anchor
-        + "\nvoid b_orunesXtra(int nargs);"
-        + "\nvoid b_orunesXtnd(int nargs);"
+    hdr = hdr.replace(
+        anchor,
+        anchor + "\nvoid b_orunesXtra(int nargs);\nvoid b_orunesXtnd(int nargs);",
+        1,
     )
-    hdr = hdr.replace(anchor, replacement, 1)
     builtins_h.write_text(hdr, encoding="utf-8")
     print("Added Oracle builtin declarations.")
 
@@ -94,8 +91,11 @@ java = activity.read_text(encoding="utf-8")
 marker = "// ORACLE_RUNES_DIRECT_BOOT_PATCH"
 
 if marker not in java:
-    oncreate_anchor = "\t@Override\n\tpublic void onCreate(Bundle savedInstanceState) {"
-    if oncreate_anchor not in java:
+    oncreate_pattern = re.compile(
+        r'(?m)^\t@Override\n\tpublic void onCreate\(Bundle savedInstanceState\) \{'
+    )
+    oncreate_match = oncreate_pattern.search(java)
+    if not oncreate_match:
         raise RuntimeError("Could not find ScummVMActivity.onCreate()")
 
     helpers = r'''
@@ -148,42 +148,31 @@ if marker not in java:
 	}
 
 '''
-    java = java.replace(oncreate_anchor, helpers + oncreate_anchor, 1)
+    java = java[:oncreate_match.start()] + helpers + java[oncreate_match.start():]
 
-    old = '''		final Uri intentData = getIntent().getData();
-		String[] args;
-		if (intentData == null) {
-			args = new String[]{
-				"ScummVM"
-			};
-		} else {
-			args = new String[]{
-				"ScummVM",
-				intentData.getSchemeSpecificPart()
-			};
-		}
-		_scummvm.setArgs(args);'''
+    args_pattern = re.compile(
+        r'\t\tfinal Uri intentData = getIntent\(\)\.getData\(\);\n'
+        r'\t\tString\[\] args;.*?'
+        r'\t\t_scummvm\.setArgs\(args\);',
+        re.DOTALL,
+    )
 
-    new = '''		try {
-			prepareOracleOfRunes();
-		} catch (IOException e) {
-			Log.e(ScummVM.LOG_TAG, "Failed to prepare Oracle of Runes", e);
-		}
+    direct_args = '''\t\ttry {
+\t\t\tprepareOracleOfRunes();
+\t\t} catch (IOException e) {
+\t\t\tLog.e(ScummVM.LOG_TAG, "Failed to prepare Oracle of Runes", e);
+\t\t}
 
-		String[] args = new String[]{
-			"ScummVM",
-			"orunes"
-		};
+\t\tString[] args = new String[]{
+\t\t\t"ScummVM",
+\t\t\t"orunes"
+\t\t};
+\t\t_scummvm.setArgs(args);'''
 
-		_scummvm.setArgs(args);'''
+    java, count = args_pattern.subn(direct_args, java, count=1)
+    if count != 1:
+        raise RuntimeError("Could not find current ScummVM Android argument block")
 
-    if old not in java:
-        raise RuntimeError(
-            "Android launch block changed upstream. "
-            "Do not build: send the GitHub error so the patch can be updated."
-        )
-
-    java = java.replace(old, new, 1)
     activity.write_text(java, encoding="utf-8")
     print("Applied Oracle Android direct-boot patch.")
 else:
