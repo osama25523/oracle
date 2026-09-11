@@ -6,6 +6,7 @@ if len(sys.argv) != 2:
     sys.exit(1)
 
 root = Path(sys.argv[1]).resolve()
+
 tables = root / "engines" / "director" / "detection_tables.h"
 
 if not tables.exists():
@@ -14,10 +15,8 @@ if not tables.exists():
 text = tables.read_text(encoding="utf-8")
 
 # -------------------------------------------------------
-# 1) Add Oracle of Runes to the readable game-name table
+# Add Oracle of Runes game name
 # -------------------------------------------------------
-
-game_name_entry = '\t{ "orunes",\t\t\t"Oracle of Runes" },\n'
 
 if '"Oracle of Runes"' not in text:
     marker = '\t{ 0, 0 }\n};'
@@ -27,41 +26,12 @@ if '"Oracle of Runes"' not in text:
     if pos == -1:
         raise RuntimeError("Could not find end of directorGames table")
 
-    text = text[:pos] + game_name_entry + text[pos:]
-
-    print("Added Oracle of Runes game name.")
-else:
-    print("Oracle of Runes game name already present.")
-
-# -------------------------------------------------------
-# 2) Add Director 7.02 detection entry
-# ScummVM uses its own file hash calculation for detection.
-# -------------------------------------------------------
-
-detection_marker = "// ORACLE_OF_RUNES_DETECTION"
-
-if detection_marker not in text:
-    end_marker = "\t{ AD_TABLE_END_MARKER, GID_GENERIC, 0 }"
-
-    pos = text.find(end_marker)
-
-    if pos == -1:
-        raise RuntimeError("Could not find gameDescriptions end marker")
-
-    entry = '''\
-\t// ORACLE_OF_RUNES_DETECTION
-\tWINGAME1("orunes", "", "runes7.dxr",
-\t\t"f1ed1b8cd001ea37d72539ad427ff91b",
-\t\t3319232, 702),
-
-'''
+    entry = '\t{ "orunes", "Oracle of Runes" },\n'
 
     text = text[:pos] + entry + text[pos:]
 
-    print("Added Oracle of Runes Director 7.02 detection.")
-else:
-    print("Oracle of Runes detection already present.")
+    print("Added Oracle of Runes name")
 
 tables.write_text(text, encoding="utf-8")
 
-print("Patch completed successfully.")
+print("Patch completed.")
