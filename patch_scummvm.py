@@ -34,7 +34,8 @@ else:
     print("Oracle of Runes game name already present.")
 
 # -------------------------------------------------------
-# 2) Add Director detection entry
+# 2) Add Director 7.02 detection entry
+# ScummVM uses its own file hash calculation for detection.
 # -------------------------------------------------------
 
 detection_marker = "// ORACLE_OF_RUNES_DETECTION"
@@ -50,14 +51,14 @@ if detection_marker not in text:
     entry = '''\
 \t// ORACLE_OF_RUNES_DETECTION
 \tWINGAME1("orunes", "", "runes7.dxr",
-\t\t"33f63d3d8f8e26f604e42cb332bc311b",
+\t\t"f1ed1b8cd001ea37d72539ad427ff91b",
 \t\t3319232, 702),
 
 '''
 
     text = text[:pos] + entry + text[pos:]
 
-    print("Added Oracle of Runes Director detection.")
+    print("Added Oracle of Runes Director 7.02 detection.")
 else:
     print("Oracle of Runes detection already present.")
 
