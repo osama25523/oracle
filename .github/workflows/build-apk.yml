@@ -1,4 +1,4 @@
-name: Build Oracle of Runes Android APK
+name: Build Oracle of Runes Direct Android APK
 
 on:
   workflow_dispatch:
@@ -46,17 +46,14 @@ jobs:
           echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/23.2.8568313" >> "$GITHUB_ENV"
 
       - name: Clone ScummVM
-        shell: bash
         run: |
           git clone --depth 1 https://github.com/scummvm/scummvm.git scummvm-src
 
-      - name: Patch Oracle of Runes
-        shell: bash
+      - name: Patch Android direct boot
         run: |
           python3 patch_scummvm.py scummvm-src
 
       - name: Clone Oboe
-        shell: bash
         run: |
           git clone --depth 1 https://github.com/google/oboe.git oboe
 
@@ -100,7 +97,7 @@ jobs:
             --enable-engine=director \
             --disable-debug
 
-      - name: Build ScummVM Android
+      - name: Build native ScummVM
         working-directory: scummvm-src
         shell: bash
         run: |
@@ -112,48 +109,20 @@ jobs:
           make -j2
 
           test -d android_project
+          test -d android_project/mainAssets
 
-      - name: Bundle Oracle of Runes
+      - name: Bundle Oracle of Runes into APK assets
         shell: bash
         run: |
-          GAME_ASSETS="scummvm-src/android_project/mainAssets/src/main/assets/oracle-runes-game"
+          ASSET_DIR="scummvm-src/android_project/mainAssets/src/main/assets/oracle-runes-game"
 
-          mkdir -p "$GAME_ASSETS"
+          mkdir -p "$ASSET_DIR"
 
-          cp game_data/Runes.dat "$GAME_ASSETS/"
-          cp game_data/Runes.skr "$GAME_ASSETS/"
-          cp game_data/runes7.dxr "$GAME_ASSETS/"
+          cp game_data/runes7.dxr "$ASSET_DIR/"
+          cp game_data/Runes.dat "$ASSET_DIR/"
+          cp game_data/Runes.skr "$ASSET_DIR/"
 
-      - name: Create Oracle autorun configuration
-        shell: bash
-        run: |
-          ASSETS="scummvm-src/android_project/mainAssets/src/main/assets"
-
-          cat > "$ASSETS/oracle-runes.ini" <<'EOF'
-          [orunes]
-          description=Oracle of Runes
-          engineid=director
-          gameid=director
-          platform=windows
-          version=702
-          start_movie=runes7.dxr
-          path=oracle-runes-game
-          fullscreen=true
-          EOF
-
-      - name: Add autorun parameters
-        shell: bash
-        run: |
-          ASSETS="scummvm-src/android_project/mainAssets/src/main/assets"
-
-          cat > "$ASSETS/scummvm-autorun" <<'EOF'
-          --engine=director
-          --platform=windows
-          --path=oracle-runes-game
-          --start-movie=runes7.dxr
-          --fullscreen
-          director
-          EOF
+          ls -lah "$ASSET_DIR"
 
       - name: Build APK
         working-directory: scummvm-src/android_project
@@ -188,14 +157,12 @@ jobs:
         shell: bash
         run: |
           mkdir -p output
-
-          cp "$APK_PATH" \
-            output/Oracle-of-Runes-direct.apk
+          cp "$APK_PATH" output/Oracle-of-Runes-DIRECT.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: Oracle-of-Runes-DIRECT
-          path: output/Oracle-of-Runes-direct.apk
+          path: output/Oracle-of-Runes-DIRECT.apk
           if-no-files-found: error
           retention-days: 7
