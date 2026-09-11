@@ -11,8 +11,9 @@ root = Path(sys.argv[1]).resolve()
 builtins_cpp = root / "engines" / "director" / "lingo" / "lingo-builtins.cpp"
 builtins_h = root / "engines" / "director" / "lingo" / "lingo-builtins.h"
 activity = root / "backends" / "platform" / "android" / "org" / "scummvm" / "scummvm" / "ScummVMActivity.java"
+events_java = root / "backends" / "platform" / "android" / "org" / "scummvm" / "scummvm" / "ScummVMEvents.java"
 
-for p in (builtins_cpp, builtins_h, activity):
+for p in (builtins_cpp, builtins_h, activity, events_java):
     if not p.exists():
         raise FileNotFoundError(str(p))
 
@@ -216,11 +217,41 @@ if marker not in java:
     activity.write_text(java, encoding="utf-8")
 
 # ============================================================
-# C) Strong verification
+# C) Force real left-mouse clicks from finger taps
+# ============================================================
+
+events = events_java.read_text(encoding="utf-8")
+if "ORACLE_RUNES_REAL_MOUSE_CLICK" not in events:
+    tap_pattern = re.compile(
+        r'(?P<indent>\t\t\t)_scummvm\.pushEvent\(JE_TAP, \(int\)e\.getX\(\), \(int\)e\.getY\(\),\n'
+        r'\s*\(int\)\(e\.getEventTime\(\) - e\.getDownTime\(\)\), 0, 0, 0\);'
+    )
+    match = tap_pattern.search(events)
+    if not match:
+        raise RuntimeError("Could not locate Android single-tap JE_TAP event")
+
+    indent = match.group("indent")
+    real_click = (
+        f'{indent}// ORACLE_RUNES_REAL_MOUSE_CLICK\n'
+        f'{indent}final int oracleX = (int)e.getX();\n'
+        f'{indent}final int oracleY = (int)e.getY();\n'
+        f'{indent}_scummvm.pushEvent(JE_MOUSE_MOVE, oracleX, oracleY, 0, 0, 0, 0);\n'
+        f'{indent}_scummvm.pushEvent(JE_LMB_DOWN, oracleX, oracleY, 0, 0, 0, 0);\n'
+        f'{indent}_scummvm.pushEvent(JE_LMB_UP, oracleX, oracleY, 0, 0, 0, 0);'
+    )
+    events = events[:match.start()] + real_click + events[match.end():]
+    events_java.write_text(events, encoding="utf-8")
+    print("Applied Oracle real mouse-click touch patch.")
+else:
+    print("Oracle real mouse-click patch already present.")
+
+# ============================================================
+# D) Strong verification
 # ============================================================
 cpp_check = builtins_cpp.read_text(encoding="utf-8")
 hdr_check = builtins_h.read_text(encoding="utf-8")
 java_check = activity.read_text(encoding="utf-8")
+events_check = events_java.read_text(encoding="utf-8")
 checks = {
     "xtra": '"xtra", LB::b_orunesXtra' in cpp_check,
     "xtnd": '"xtnd", LB::b_orunesXtnd' in cpp_check,
@@ -230,6 +261,9 @@ checks = {
     "header getAt": "void b_orunesGetAt(int nargs);" in hdr_check,
     "Android direct boot": "ORACLE_RUNES_DIRECT_BOOT_PATCH" in java_check,
     "Direct touch": "touch_mode_2d_games=mouse" in java_check,
+    "Real mouse click": "ORACLE_RUNES_REAL_MOUSE_CLICK" in events_check,
+    "LMB down": "JE_LMB_DOWN, oracleX, oracleY" in events_check,
+    "LMB up": "JE_LMB_UP, oracleX, oracleY" in events_check,
 }
 failed = [name for name, ok in checks.items() if not ok]
 if failed:
