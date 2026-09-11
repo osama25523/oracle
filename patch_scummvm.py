@@ -7,156 +7,78 @@ if len(sys.argv) != 2:
 
 root = Path(sys.argv[1]).resolve()
 
-detection_tables = root / "engines" / "director" / "detection_tables.h"
-detection_cpp = root / "engines" / "director" / "detection.cpp"
+tables = root / "engines" / "director" / "detection_tables.h"
 
-if not detection_tables.exists():
-    raise FileNotFoundError(detection_tables)
+if not tables.exists():
+    raise FileNotFoundError(tables)
 
-if not detection_cpp.exists():
-    raise FileNotFoundError(detection_cpp)
+text = tables.read_text(encoding="utf-8")
 
-print("Patching Oracle of Runes detection...")
+# ---------------------------------------------------------
+# 1) Add human-readable game name
+# ---------------------------------------------------------
 
-# ------------------------------------------------------------
-# 1) Add normal table-based detection entry
-# ------------------------------------------------------------
+if '"orunes"' not in text:
+    start_marker = "static const PlainGameDescriptor directorGames[] = {"
+    start = text.find(start_marker)
 
-tables_text = detection_tables.read_text(
-    encoding="utf-8",
-    errors="ignore"
-)
+    if start == -1:
+        raise RuntimeError("directorGames table not found")
 
-marker = "ORACLE_OF_RUNES_CUSTOM_ENTRY"
+    end = text.find("};", start)
 
-if marker not in tables_text:
-    insert_pos = tables_text.rfind("};")
+    if end == -1:
+        raise RuntimeError("directorGames table end not found")
+
+    entry = '\t{ "orunes", "Oracle of Runes" },\n'
+
+    text = text[:end] + entry + text[end:]
+
+    print("Added Oracle of Runes to directorGames")
+else:
+    print("Oracle of Runes game ID already exists")
+
+
+# ---------------------------------------------------------
+# 2) Add actual Director 7 game detection entry
+# ---------------------------------------------------------
+
+oracle_detection_marker = "ORACLE_OF_RUNES_DETECTION"
+
+if oracle_detection_marker not in text:
+
+    table_marker = "static const DirectorGameDescription gameDescriptions[] = {"
+    table_start = text.find(table_marker)
+
+    if table_start == -1:
+        raise RuntimeError("gameDescriptions table not found")
+
+    end_marker = "{ AD_TABLE_END_MARKER, GID_GENERIC, 0 }"
+    insert_pos = text.find(end_marker, table_start)
 
     if insert_pos == -1:
-        raise RuntimeError(
-            "Could not find insertion point in detection_tables.h"
-        )
+        raise RuntimeError("AD_TABLE_END_MARKER not found")
 
-    oracle_entry = r'''
-	// ORACLE_OF_RUNES_CUSTOM_ENTRY
-	{
-		{
-			"orunes",
-			"Oracle of Runes",
-			AD_ENTRY1s(
-				"runes7.dxr",
-				nullptr,
-				0
-			),
-			Common::EN_ANY,
-			Common::kPlatformWindows,
-			ADGF_NO_FLAGS,
-			GUIO0()
-		},
-		7,
-		702
-	},
+    entry = '''
+\t// ORACLE_OF_RUNES_DETECTION
+\tWINGAME1(
+\t\t"orunes",
+\t\t"",
+\t\t"runes7.dxr",
+\t\t"33f63d3d8f8e26f604e42cb332bc311b",
+\t\t3319232,
+\t\t702
+\t),
 
 '''
 
-    tables_text = (
-        tables_text[:insert_pos]
-        + oracle_entry
-        + tables_text[insert_pos:]
-    )
+    text = text[:insert_pos] + entry + text[insert_pos:]
 
-    detection_tables.write_text(
-        tables_text,
-        encoding="utf-8"
-    )
-
-    print("Added Oracle of Runes detection table entry.")
+    print("Added Oracle of Runes Director 7.02 detection")
 else:
-    print("Detection table entry already exists.")
+    print("Oracle of Runes detection already exists")
 
-# ------------------------------------------------------------
-# 2) Add filename fallback detection
-# ------------------------------------------------------------
 
-cpp_text = detection_cpp.read_text(
-    encoding="utf-8",
-    errors="ignore"
-)
-
-fallback_marker = "ORACLE_OF_RUNES_FILENAME_FALLBACK"
-
-if fallback_marker not in cpp_text:
-
-    # Find the fallbackDetect method
-    search_candidates = [
-        "DirectorMetaEngineDetection::fallbackDetect",
-        "DirectorMetaEngineDetection::fallbackDetectExtern",
-        "DirectorMetaEngineDetection::fallbackDetectFileBased"
-    ]
-
-    method_pos = -1
-
-    for candidate in search_candidates:
-        method_pos = cpp_text.find(candidate)
-        if method_pos != -1:
-            break
-
-    if method_pos == -1:
-        raise RuntimeError(
-            "Could not find Director fallback detection function "
-            "in detection.cpp"
-        )
-
-    brace_pos = cpp_text.find("{", method_pos)
-
-    if brace_pos == -1:
-        raise RuntimeError(
-            "Could not find fallback function opening brace"
-        )
-
-    fallback_code = '''
-	// ORACLE_OF_RUNES_FILENAME_FALLBACK
-	{
-		Common::FSNode runesFile = fslist.begin()->getParent().getChild("runes7.dxr");
-
-		if (runesFile.exists()) {
-			Director::DirectorGameDescription desc = {
-				{
-					"orunes",
-					"Oracle of Runes",
-					AD_ENTRY1s(
-						"runes7.dxr",
-						nullptr,
-						0
-					),
-					Common::EN_ANY,
-					Common::kPlatformWindows,
-					ADGF_NO_FLAGS,
-					GUIO0()
-				},
-				7,
-				702
-			};
-
-			return desc;
-		}
-	}
-
-'''
-
-    cpp_text = (
-        cpp_text[:brace_pos + 1]
-        + fallback_code
-        + cpp_text[brace_pos + 1:]
-    )
-
-    detection_cpp.write_text(
-        cpp_text,
-        encoding="utf-8"
-    )
-
-    print("Added filename fallback detection.")
-else:
-    print("Filename fallback already exists.")
+tables.write_text(text, encoding="utf-8")
 
 print("Oracle of Runes patch completed successfully.")
