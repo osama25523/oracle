@@ -23,7 +23,6 @@ for p in (builtins_cpp, builtins_h, activity):
 cpp = builtins_cpp.read_text(encoding="utf-8")
 
 if "ORACLE_RUNES_SAFE_XTRA" not in cpp:
-    # Match the upstream xtra registration regardless of tabs/alignment.
     xtra_pattern = re.compile(
         r'(?m)^(?P<indent>\s*)\{\s*"xtra"\s*,\s*LB::b_xtra\s*,\s*1\s*,\s*1\s*,\s*500\s*,\s*FBLTIN\s*\}\s*,\s*(?://[^\n]*)?$'
     )
@@ -81,7 +80,91 @@ if "void b_orunesXtra(int nargs);" not in hdr:
         1,
     )
     builtins_h.write_text(hdr, encoding="utf-8")
-    print("Added Oracle builtin declarations.")
+    print("Added Oracle xtra/xtnd declarations.")
+
+# ------------------------------------------------------------
+# getAt compatibility
+# Upstream ARRBOUNDSCHECK/TYPECHECK paths can return without pushing
+# a value. Since getAt is registered as a function, that opens the
+# debugger with: Builtin 'getAt' did not return value.
+# ------------------------------------------------------------
+
+cpp = builtins_cpp.read_text(encoding="utf-8")
+
+if "ORACLE_RUNES_SAFE_GETAT" not in cpp:
+    getat_pattern = re.compile(
+        r'(?m)^(?P<indent>\s*)\{\s*"getAt"\s*,\s*LB::b_getAt\s*,\s*2\s*,\s*2\s*,\s*400\s*,\s*FBLTIN_LIST\s*\}\s*,\s*(?://[^\n]*)?$'
+    )
+    match = getat_pattern.search(cpp)
+    if not match:
+        raise RuntimeError("Could not find current ScummVM getAt builtin registration")
+
+    indent = match.group("indent")
+    replacement = f'{indent}{{ "getAt", LB::b_orunesGetAt, 2, 2, 400, FBLTIN_LIST }}, // ORACLE_RUNES_SAFE_GETAT'
+    cpp = cpp[:match.start()] + replacement + cpp[match.end():]
+
+    impl_anchor = "void LB::b_getAt(int nargs) {"
+    impl_pos = cpp.find(impl_anchor)
+    if impl_pos == -1:
+        raise RuntimeError("Could not locate LB::b_getAt implementation")
+
+    helper = r'''
+// ORACLE_RUNES_SAFE_GETAT
+void LB::b_orunesGetAt(int nargs) {
+	Datum indexD = g_lingo->pop();
+	Datum list = g_lingo->pop();
+
+	if (indexD.type != INT && indexD.type != FLOAT) {
+		warning("Oracle of Runes: getAt() received invalid index type; returning void");
+		g_lingo->pushVoid();
+		return;
+	}
+
+	int index = indexD.asInt();
+
+	switch (list.type) {
+	case ARRAY:
+	case POINT:
+	case RECT:
+		if (index < 1 || index > (int)list.u.farr->arr.size()) {
+			warning("Oracle of Runes: getAt() index %d out of bounds; returning void", index);
+			g_lingo->pushVoid();
+			return;
+		}
+		g_lingo->push(list.u.farr->arr[index - 1]);
+		return;
+
+	case PARRAY:
+		if (index < 1 || index > (int)list.u.parr->arr.size()) {
+			warning("Oracle of Runes: getAt() property-list index %d out of bounds; returning void", index);
+			g_lingo->pushVoid();
+			return;
+		}
+		g_lingo->push(list.u.parr->arr[index - 1].v);
+		return;
+
+	default:
+		warning("Oracle of Runes: getAt() received unsupported list type; returning void");
+		g_lingo->pushVoid();
+		return;
+	}
+}
+
+'''
+    cpp = cpp[:impl_pos] + helper + cpp[impl_pos:]
+    builtins_cpp.write_text(cpp, encoding="utf-8")
+    print("Applied Oracle safe getAt compatibility patch.")
+else:
+    print("Oracle getAt patch already present.")
+
+hdr = builtins_h.read_text(encoding="utf-8")
+if "void b_orunesGetAt(int nargs);" not in hdr:
+    anchor = "void b_getAt(int nargs);"
+    if anchor not in hdr:
+        raise RuntimeError("Could not find b_getAt declaration in lingo-builtins.h")
+    hdr = hdr.replace(anchor, anchor + "\nvoid b_orunesGetAt(int nargs);", 1)
+    builtins_h.write_text(hdr, encoding="utf-8")
+    print("Added Oracle getAt declaration.")
 
 # ============================================================
 # B) Android direct boot
@@ -189,10 +272,13 @@ java_check = activity.read_text(encoding="utf-8")
 checks = {
     "xtra registration redirected": '"xtra", LB::b_orunesXtra' in cpp_check,
     "xtnd registration present": '"xtnd", LB::b_orunesXtnd' in cpp_check,
+    "getAt registration redirected": '"getAt", LB::b_orunesGetAt' in cpp_check,
     "xtra implementation present": "void LB::b_orunesXtra(int nargs)" in cpp_check,
     "xtnd implementation present": "void LB::b_orunesXtnd(int nargs)" in cpp_check,
+    "getAt implementation present": "void LB::b_orunesGetAt(int nargs)" in cpp_check,
     "header xtra declaration": "void b_orunesXtra(int nargs);" in hdr_check,
     "header xtnd declaration": "void b_orunesXtnd(int nargs);" in hdr_check,
+    "header getAt declaration": "void b_orunesGetAt(int nargs);" in hdr_check,
     "Android direct boot": "ORACLE_RUNES_DIRECT_BOOT_PATCH" in java_check,
 }
 
