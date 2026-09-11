@@ -26,17 +26,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            build-essential \
-            git \
-            python3 \
-            pkg-config \
-            zip \
-            unzip \
-            cmake \
-            ninja-build
+            build-essential git python3 pkg-config zip unzip cmake ninja-build
 
           yes | sdkmanager --licenses >/dev/null || true
-
           sdkmanager \
             "platform-tools" \
             "platforms;android-37.0" \
@@ -48,18 +40,23 @@ jobs:
 
       - name: Clone ScummVM
         shell: bash
-        run: |
-          git clone --depth 1 https://github.com/scummvm/scummvm.git scummvm-src
+        run: git clone --depth 1 https://github.com/scummvm/scummvm.git scummvm-src
 
       - name: Add Oracle of Runes Director detection
         shell: bash
+        run: python3 patch_scummvm.py scummvm-src
+
+      - name: Verify Oracle of Runes source patch
+        shell: bash
         run: |
-          python3 patch_scummvm.py scummvm-src
+          grep -n 'Oracle of Runes' scummvm-src/engines/director/detection_tables.h | head
+          grep -n 'WINGAME1("orunes"' scummvm-src/engines/director/detection_tables.h
+          grep -n 'ORACLE_OF_RUNES_FILENAME_FALLBACK' scummvm-src/engines/director/detection.cpp
+          grep -n 'equalsIgnoreCase("runes7.dxr")' scummvm-src/engines/director/detection.cpp
 
       - name: Clone Oboe
         shell: bash
-        run: |
-          git clone --depth 1 https://github.com/google/oboe.git oboe
+        run: git clone --depth 1 https://github.com/google/oboe.git oboe
 
       - name: Build Oboe for Android arm64
         shell: bash
@@ -80,45 +77,23 @@ jobs:
 
           cmake --build oboe-build -j2
 
-          echo "Searching for liboboe.a..."
-          find oboe-build -name "liboboe.a" -print
-
-          OBOE_LIB="$(find oboe-build -name "liboboe.a" | head -n 1)"
-
-          if [ -z "$OBOE_LIB" ]; then
-            echo "ERROR: liboboe.a was not generated"
-            exit 1
-          fi
+          OBOE_LIB="$(find oboe-build -name 'liboboe.a' | head -n 1)"
+          test -n "$OBOE_LIB"
+          test -f "$OBOE_LIB"
 
           OBOE_LIB_DIR="$(dirname "$OBOE_LIB")"
-
           echo "OBOE_LIB=$GITHUB_WORKSPACE/$OBOE_LIB" >> "$GITHUB_ENV"
           echo "OBOE_LIB_DIR=$GITHUB_WORKSPACE/$OBOE_LIB_DIR" >> "$GITHUB_ENV"
           echo "OBOE_INCLUDE_DIR=$GITHUB_WORKSPACE/oboe/include" >> "$GITHUB_ENV"
-
-      - name: Show Oboe paths
-        shell: bash
-        run: |
-          echo "OBOE_LIB=$OBOE_LIB"
-          echo "OBOE_LIB_DIR=$OBOE_LIB_DIR"
-          echo "OBOE_INCLUDE_DIR=$OBOE_INCLUDE_DIR"
-
-          test -f "$OBOE_LIB"
-          test -d "$OBOE_INCLUDE_DIR"
 
       - name: Configure ScummVM for Android arm64 with Director only
         working-directory: scummvm-src
         shell: bash
         run: |
           export ANDROID_NDK_ROOT="$ANDROID_SDK_ROOT/ndk/23.2.8568313"
-
           export CFLAGS="-I$OBOE_INCLUDE_DIR"
           export CXXFLAGS="-I$OBOE_INCLUDE_DIR"
           export LDFLAGS="-L$OBOE_LIB_DIR"
-
-          echo "ANDROID_NDK_ROOT=$ANDROID_NDK_ROOT"
-          echo "CXXFLAGS=$CXXFLAGS"
-          echo "LDFLAGS=$LDFLAGS"
 
           ./configure \
             --host=android-arm64-v8a \
@@ -131,104 +106,66 @@ jobs:
         shell: bash
         run: |
           export ANDROID_NDK_ROOT="$ANDROID_SDK_ROOT/ndk/23.2.8568313"
-
           export CFLAGS="-I$OBOE_INCLUDE_DIR"
           export CXXFLAGS="-I$OBOE_INCLUDE_DIR"
           export LDFLAGS="-L$OBOE_LIB_DIR"
 
           make -j2
-
-          echo "Checking generated Android project..."
-
           test -d android_project
           test -f android_project/src.properties
           test -d android_project/mainAssets
 
-          echo "Android project successfully generated."
-
-      - name: Bundle Oracle of Runes game files with build artifact
+      - name: Bundle Oracle of Runes game files
         shell: bash
         run: |
           mkdir -p scummvm-src/android_project/oracle-runes-game
+          cp game_data/* scummvm-src/android_project/oracle-runes-game/
 
-          cp game_data/* \
-            scummvm-src/android_project/oracle-runes-game/
+          mkdir -p scummvm-src/android_project/mainAssets/src/main/assets/oracle-runes-game
+          cp game_data/* scummvm-src/android_project/mainAssets/src/main/assets/oracle-runes-game/
 
-          mkdir -p \
-            scummvm-src/android_project/mainAssets/src/main/assets/oracle-runes-game
-
-          cp game_data/* \
-            scummvm-src/android_project/mainAssets/src/main/assets/oracle-runes-game/
-
-          echo "Game files bundled:"
-          ls -lah \
-            scummvm-src/android_project/oracle-runes-game
+          # Also include a small text fingerprint so the exact source data can be
+          # checked from the build artifact if needed.
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          p = Path('game_data/runes7.dxr')
+          b = p.read_bytes()
+          Path('scummvm-src/android_project/oracle-runes-game/BUILD_FINGERPRINT.txt').write_text(
+              f'size={len(b)}\nmd5_first5000={hashlib.md5(b[:5000]).hexdigest()}\nmd5_full={hashlib.md5(b).hexdigest()}\n'
+          )
+          PY
 
       - name: Build APK
         working-directory: scummvm-src/android_project
         shell: bash
         run: |
           printf 'sdk.dir=%s\n' "$ANDROID_SDK_ROOT" > local.properties
-
           chmod +x gradlew
-
-          ./gradlew \
-            --no-daemon \
-            assembleDebug
+          ./gradlew --no-daemon assembleDebug
 
       - name: Find generated APK
         shell: bash
         run: |
-          echo "Searching for generated APK..."
-
-          find scummvm-src/android_project \
-            -type f \
-            -name "*.apk" \
-            -print
-
-          APK_PATH="$(
-            find scummvm-src/android_project \
-              -type f \
-              -name "*.apk" \
-              | head -n 1
-          )"
-
-          if [ -z "$APK_PATH" ]; then
-            echo "ERROR: No APK file was generated."
-            exit 1
-          fi
-
+          APK_PATH="$(find scummvm-src/android_project -type f -name '*.apk' | head -n 1)"
+          echo "APK found at: $APK_PATH"
+          test -n "$APK_PATH"
+          test -f "$APK_PATH"
           echo "APK_PATH=$APK_PATH" >> "$GITHUB_ENV"
 
       - name: Collect output
         shell: bash
         run: |
           mkdir -p output
-
-          echo "Using APK:"
-          echo "$APK_PATH"
-
-          test -f "$APK_PATH"
-
-          cp "$APK_PATH" \
-            output/Oracle-of-Runes-debug.apk
-
-          cp -r game_data \
-            output/oracle-runes-game
-
+          cp "$APK_PATH" output/Oracle-of-Runes-debug.apk
+          cp -r scummvm-src/android_project/oracle-runes-game output/oracle-runes-game
           cd output
-
-          zip -r \
-            Oracle-of-Runes-Android-Package.zip \
-            Oracle-of-Runes-debug.apk \
-            oracle-runes-game
-
-          ls -lah
+          zip -r Oracle-of-Runes-Android-Package.zip Oracle-of-Runes-debug.apk oracle-runes-game
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Oracle-of-Runes-Android
+          name: Oracle-of-Runes-Android-FIXED
           path: output/Oracle-of-Runes-Android-Package.zip
           if-no-files-found: error
           retention-days: 7
