@@ -2,6 +2,13 @@ name: Build Oracle of Runes Direct Android APK
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'patch_scummvm.py'
+      - '.github/workflows/build-apk.yml'
+      - 'game_data/**'
 
 jobs:
   build:
