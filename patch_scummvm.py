@@ -6,7 +6,6 @@ if len(sys.argv) != 2:
     sys.exit(1)
 
 root = Path(sys.argv[1]).resolve()
-
 tables = root / "engines" / "director" / "detection_tables.h"
 
 if not tables.exists():
@@ -14,71 +13,54 @@ if not tables.exists():
 
 text = tables.read_text(encoding="utf-8")
 
-# ---------------------------------------------------------
-# 1) Add human-readable game name
-# ---------------------------------------------------------
+# -------------------------------------------------------
+# 1) Add Oracle of Runes to the readable game-name table
+# -------------------------------------------------------
 
-if '"orunes"' not in text:
-    start_marker = "static const PlainGameDescriptor directorGames[] = {"
-    start = text.find(start_marker)
+game_name_entry = '\t{ "orunes",\t\t\t"Oracle of Runes" },\n'
 
-    if start == -1:
-        raise RuntimeError("directorGames table not found")
+if '"Oracle of Runes"' not in text:
+    marker = '\t{ 0, 0 }\n};'
 
-    end = text.find("};", start)
+    pos = text.find(marker)
 
-    if end == -1:
-        raise RuntimeError("directorGames table end not found")
+    if pos == -1:
+        raise RuntimeError("Could not find end of directorGames table")
 
-    entry = '\t{ "orunes", "Oracle of Runes" },\n'
+    text = text[:pos] + game_name_entry + text[pos:]
 
-    text = text[:end] + entry + text[end:]
-
-    print("Added Oracle of Runes to directorGames")
+    print("Added Oracle of Runes game name.")
 else:
-    print("Oracle of Runes game ID already exists")
+    print("Oracle of Runes game name already present.")
 
+# -------------------------------------------------------
+# 2) Add Director detection entry
+# -------------------------------------------------------
 
-# ---------------------------------------------------------
-# 2) Add actual Director 7 game detection entry
-# ---------------------------------------------------------
+detection_marker = "// ORACLE_OF_RUNES_DETECTION"
 
-oracle_detection_marker = "ORACLE_OF_RUNES_DETECTION"
+if detection_marker not in text:
+    end_marker = "\t{ AD_TABLE_END_MARKER, GID_GENERIC, 0 }"
 
-if oracle_detection_marker not in text:
+    pos = text.find(end_marker)
 
-    table_marker = "static const DirectorGameDescription gameDescriptions[] = {"
-    table_start = text.find(table_marker)
+    if pos == -1:
+        raise RuntimeError("Could not find gameDescriptions end marker")
 
-    if table_start == -1:
-        raise RuntimeError("gameDescriptions table not found")
-
-    end_marker = "{ AD_TABLE_END_MARKER, GID_GENERIC, 0 }"
-    insert_pos = text.find(end_marker, table_start)
-
-    if insert_pos == -1:
-        raise RuntimeError("AD_TABLE_END_MARKER not found")
-
-    entry = '''
+    entry = '''\
 \t// ORACLE_OF_RUNES_DETECTION
-\tWINGAME1(
-\t\t"orunes",
-\t\t"",
-\t\t"runes7.dxr",
+\tWINGAME1("orunes", "", "runes7.dxr",
 \t\t"33f63d3d8f8e26f604e42cb332bc311b",
-\t\t3319232,
-\t\t702
-\t),
+\t\t3319232, 702),
 
 '''
 
-    text = text[:insert_pos] + entry + text[insert_pos:]
+    text = text[:pos] + entry + text[pos:]
 
-    print("Added Oracle of Runes Director 7.02 detection")
+    print("Added Oracle of Runes Director detection.")
 else:
-    print("Oracle of Runes detection already exists")
-
+    print("Oracle of Runes detection already present.")
 
 tables.write_text(text, encoding="utf-8")
 
-print("Oracle of Runes patch completed successfully.")
+print("Patch completed successfully.")
