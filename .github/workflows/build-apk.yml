@@ -7,6 +7,7 @@ on:
       - main
     paths:
       - 'patch_scummvm.py'
+      - 'patch_diagnostics.py'
       - '.github/workflows/build-apk.yml'
       - 'game_data/**'
 
@@ -43,8 +44,9 @@ jobs:
       - name: Patch Oracle of Runes
         shell: bash
         run: |
-          python3 -m py_compile patch_scummvm.py
+          python3 -m py_compile patch_scummvm.py patch_diagnostics.py
           python3 patch_scummvm.py scummvm-src
+          python3 patch_diagnostics.py scummvm-src
 
       - name: Verify Oracle patch
         shell: bash
@@ -54,6 +56,7 @@ jobs:
           grep -n 'void LB::b_orunesXtra' scummvm-src/engines/director/lingo/lingo-builtins.cpp
           grep -n 'void LB::b_orunesXtnd' scummvm-src/engines/director/lingo/lingo-builtins.cpp
           grep -n 'ORACLE_RUNES_DIRECT_BOOT_PATCH' scummvm-src/backends/platform/android/org/scummvm/scummvm/ScummVMActivity.java
+          grep -n 'ORACLE_RUNES_CLICK_DIAGNOSTIC' scummvm-src/engines/director/events.cpp
           echo "PATCH VERIFIED"
 
       - name: Clone Oboe
@@ -129,12 +132,12 @@ jobs:
           test -n "$APK_PATH"
           test -f "$APK_PATH"
           mkdir -p output
-          cp "$APK_PATH" output/Oracle-of-Runes-direct.apk
+          cp "$APK_PATH" output/Oracle-of-Runes-diagnostic.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Oracle-of-Runes-COMPAT-FIX
-          path: output/Oracle-of-Runes-direct.apk
+          name: Oracle-of-Runes-CLICK-DIAGNOSTIC
+          path: output/Oracle-of-Runes-diagnostic.apk
           if-no-files-found: error
           retention-days: 7
