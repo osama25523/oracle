@@ -15,7 +15,7 @@ for p in (events_cpp, lingo_events_cpp, builtins_cpp):
     if not p.exists():
         raise FileNotFoundError(str(p))
 
-# 1) Compact click diagnostics: target + behavior/instance counts.
+# 1) Compact click diagnostics.
 src = events_cpp.read_text(encoding="utf-8")
 marker = "ORACLE_RUNES_CLICK_DIAGNOSTIC"
 if marker not in src:
@@ -26,24 +26,31 @@ if marker not in src:
     src = src.replace(anchor, replacement, 1)
     events_cpp.write_text(src, encoding="utf-8")
 
-# 2) Oracle D7 compatibility.
+# 2) Oracle D7 behavior compatibility.
 lingo = lingo_events_cpp.read_text(encoding="utf-8")
 
-# 2a) The movie exposes a valid behavior but ScummVM's normal `new` path
-# returns a non-object for this title. A Director behavior instance is
-# essentially a per-sprite copy of its ScriptContext, so create that object
-# directly as a compatibility fallback. This preserves method dispatch
-# (mouseDown/mouseUp) and per-instance properties.
+# 2a) Resolve the behavior ScriptContext more aggressively.
+# Some Director 7 titles carry a valid BehaviorElement but the script can be
+# filed under a different script category/cast than ScummVM expects.
+resolve_marker = "ORACLE_RUNES_RESOLVE_BEHAVIOR_SCRIPT"
+if resolve_marker not in lingo:
+    old_resolve = '''\t// Instantiate the behavior\n\tScriptContext *scr = _movie->getScriptContext(kScoreScript, behavior->memberID);\n\n\t// Some movies have behaviors with missing scripts\n\tif (scr == nullptr) {\n\t\tdebugC(7, kDebugLingoExec, "Score::createScriptInstance(): Missing script for behavior %s", behavior->toString().c_str());\n\t\treturn Datum();\n\t}'''
+    new_resolve = '''\t// Instantiate the behavior\n\t// ORACLE_RUNES_RESOLVE_BEHAVIOR_SCRIPT\n\tScriptContext *scr = _movie->getScriptContext(kScoreScript, behavior->memberID);\n\tif (scr == nullptr)\n\t\tscr = _movie->getScriptContext(kCastScript, behavior->memberID);\n\tif (scr == nullptr)\n\t\tscr = _movie->getScriptContext(kMovieScript, behavior->memberID);\n\n\t// Some old Director movies reference the default cast even though the\n\t// BehaviorElement carries a cast library that does not resolve at runtime.\n\tif (scr == nullptr && behavior->memberID.member) {\n\t\tCastMemberID oracleDefaultId(behavior->memberID.member, DEFAULT_CAST_LIB);\n\t\tscr = _movie->getScriptContext(kScoreScript, oracleDefaultId);\n\t\tif (scr == nullptr)\n\t\t\tscr = _movie->getScriptContext(kCastScript, oracleDefaultId);\n\t\tif (scr == nullptr)\n\t\t\tscr = _movie->getScriptContext(kMovieScript, oracleDefaultId);\n\t}\n\n\tif (scr == nullptr) {\n\t\twarning("Oracle of Runes: could not resolve script for behavior %s", behavior->toString().c_str());\n\t\treturn Datum();\n\t}'''
+    if old_resolve not in lingo:
+        raise RuntimeError("Could not locate behavior ScriptContext resolution block")
+    lingo = lingo.replace(old_resolve, new_resolve, 1)
+
+# 2b) If normal `new` does not yield an object, clone the ScriptContext.
 clone_marker = "ORACLE_RUNES_CLONE_BEHAVIOR_INSTANCE"
 if clone_marker not in lingo:
     old_clone = '''\tDatum instance = g_lingo->pop();\n\n\tif (instance.type != OBJECT) {\n\t\twarning("Score::createScriptInstance(): Could not instantiate behavior %s", behavior->toString().c_str());\n\t\treturn Datum();\n\t}'''
-    new_clone = '''\tDatum instance = g_lingo->pop();\n\n\tif (instance.type != OBJECT) {\n\t\t// ORACLE_RUNES_CLONE_BEHAVIOR_INSTANCE\n\t\t// Oracle of Runes (Director 7) has valid behavior ScriptContexts but\n\t\t// the normal Lingo `new` path can fail to return an object. Clone the\n\t\t// ScriptContext so behavior methods and instance properties still work.\n\t\twarning("Oracle of Runes: normal behavior instantiation failed for %s; cloning ScriptContext", behavior->toString().c_str());\n\t\tScriptContext *oracleInstance = new ScriptContext(*scr);\n\t\tinstance = Datum((AbstractObject *)oracleInstance);\n\t}'''
+    new_clone = '''\tDatum instance = g_lingo->pop();\n\n\tif (instance.type != OBJECT) {\n\t\t// ORACLE_RUNES_CLONE_BEHAVIOR_INSTANCE\n\t\twarning("Oracle of Runes: normal behavior instantiation failed for %s; cloning ScriptContext", behavior->toString().c_str());\n\t\tScriptContext *oracleInstance = new ScriptContext(*scr);\n\t\tinstance = Datum((AbstractObject *)oracleInstance);\n\t}'''
     if old_clone not in lingo:
         raise RuntimeError("Could not locate behavior instantiation failure block")
     lingo = lingo.replace(old_clone, new_clone, 1)
 
-# 2b) Keep queue fallback as a safety net for any frame where behavior
-# instances have not been created yet.
+# 2c) Queue behavior events even during the edge case where an instance is
+# not yet present. Normally #2a/#2b should make instance count non-zero.
 fallback_marker = "ORACLE_RUNES_BEHAVIOR_FALLBACK"
 if fallback_marker not in lingo:
     old = '''\t\t\t\t\t// Generate event for each behavior, and pass through for all but the last one.\n\t\t\t\t\t// This is to allow multiple behaviors on a single sprite to each have a\n\t\t\t\t\t// chance to handle the event.\n\t\t\t\t\tfor (uint i = 0; i < channel->_scriptInstanceList.size(); i++) {\n\t\t\t\t\t\tbool passThrough = (i != channel->_scriptInstanceList.size() - 1);\n\t\t\t\t\t\tqueue.push(LingoEvent(event, eventId, kSpriteHandler, passThrough, pos, pointedSpriteId, i));\n\t\t\t\t\t}'''
@@ -97,11 +104,11 @@ if xtra_count != 1 or xtnd_count != 1:
     raise RuntimeError("Could not preserve Oracle Xtra fallbacks")
 builtins_cpp.write_text(builtins, encoding="utf-8")
 
-# Verification
 click_check = events_cpp.read_text(encoding="utf-8")
 lingo_check = lingo_events_cpp.read_text(encoding="utf-8")
 checks = {
     "click diagnostic": marker in click_check and "instances %u" in click_check,
+    "script resolver": resolve_marker in lingo_check and "kCastScript" in lingo_check and "kMovieScript" in lingo_check,
     "real behavior instance fallback": clone_marker in lingo_check and "new ScriptContext(*scr)" in lingo_check,
     "event queue fallback": fallback_marker in lingo_check,
 }
@@ -109,4 +116,4 @@ failed = [name for name, ok in checks.items() if not ok]
 if failed:
     raise RuntimeError("Oracle verification failed: " + ", ".join(failed))
 
-print("ORACLE D7 REAL BEHAVIOR INSTANCE FIX VERIFIED")
+print("ORACLE D7 BEHAVIOR RESOLUTION + INSTANCE FIX VERIFIED")
