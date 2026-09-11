@@ -9,6 +9,7 @@ jobs:
     timeout-minutes: 90
 
     steps:
+
       - name: Checkout builder
         uses: actions/checkout@v4
 
@@ -25,6 +26,7 @@ jobs:
         shell: bash
         run: |
           sudo apt-get update
+
           sudo apt-get install -y \
             build-essential \
             git \
@@ -43,19 +45,57 @@ jobs:
             "build-tools;37.0.0" \
             "ndk;23.2.8568313"
 
-          echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/23.2.8568313" >> "$GITHUB_ENV"
+          echo \
+            "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/23.2.8568313" \
+            >> "$GITHUB_ENV"
 
       - name: Clone ScummVM
+        shell: bash
         run: |
-          git clone --depth 1 https://github.com/scummvm/scummvm.git scummvm-src
+          git clone \
+            --depth 1 \
+            https://github.com/scummvm/scummvm.git \
+            scummvm-src
 
-      - name: Patch Android direct boot
+      - name: Patch Oracle of Runes
+        shell: bash
         run: |
           python3 patch_scummvm.py scummvm-src
 
-      - name: Clone Oboe
+      - name: Verify Oracle Xtra patch
+        shell: bash
         run: |
-          git clone --depth 1 https://github.com/google/oboe.git oboe
+          echo "Checking xtnd patch..."
+
+          grep -n \
+            "ORACLE_RUNES_XTND_PATCH" \
+            scummvm-src/engines/director/lingo/lingo-builtins.cpp
+
+          echo "Checking xtra fallback..."
+
+          grep -n \
+            "ORACLE_RUNES_XTRA_FALLBACK" \
+            scummvm-src/engines/director/lingo/lingo-builtins.cpp
+
+          grep -n \
+            "unsupported Xtra" \
+            scummvm-src/engines/director/lingo/lingo-builtins.cpp
+
+          echo "Checking Android boot patch..."
+
+          grep -n \
+            "ORACLE_RUNES_DIRECT_BOOT_PATCH" \
+            scummvm-src/backends/platform/android/org/scummvm/scummvm/ScummVMActivity.java
+
+          echo "ALL PATCHES VERIFIED"
+
+      - name: Clone Oboe
+        shell: bash
+        run: |
+          git clone \
+            --depth 1 \
+            https://github.com/google/oboe.git \
+            oboe
 
       - name: Build Oboe
         shell: bash
@@ -74,19 +114,39 @@ jobs:
             -DOBOE_BUILD_TESTS=OFF \
             -DOBOE_BUILD_SAMPLES=OFF
 
-          cmake --build oboe-build -j2
+          cmake --build \
+            oboe-build \
+            -j2
 
-          OBOE_LIB="$(find oboe-build -name "liboboe.a" | head -n 1)"
-          OBOE_LIB_DIR="$(dirname "$OBOE_LIB")"
+          OBOE_LIB="$(
+            find oboe-build \
+              -name "liboboe.a" \
+              | head -n 1
+          )"
 
-          echo "OBOE_LIB_DIR=$GITHUB_WORKSPACE/$OBOE_LIB_DIR" >> "$GITHUB_ENV"
-          echo "OBOE_INCLUDE_DIR=$GITHUB_WORKSPACE/oboe/include" >> "$GITHUB_ENV"
+          if [ -z "$OBOE_LIB" ]; then
+            echo "liboboe.a not found"
+            exit 1
+          fi
+
+          OBOE_LIB_DIR="$(
+            dirname "$OBOE_LIB"
+          )"
+
+          echo \
+            "OBOE_LIB_DIR=$GITHUB_WORKSPACE/$OBOE_LIB_DIR" \
+            >> "$GITHUB_ENV"
+
+          echo \
+            "OBOE_INCLUDE_DIR=$GITHUB_WORKSPACE/oboe/include" \
+            >> "$GITHUB_ENV"
 
       - name: Configure ScummVM
         working-directory: scummvm-src
         shell: bash
         run: |
           export ANDROID_NDK_ROOT="$ANDROID_SDK_ROOT/ndk/23.2.8568313"
+
           export CFLAGS="-I$OBOE_INCLUDE_DIR"
           export CXXFLAGS="-I$OBOE_INCLUDE_DIR"
           export LDFLAGS="-L$OBOE_LIB_DIR"
@@ -102,6 +162,7 @@ jobs:
         shell: bash
         run: |
           export ANDROID_NDK_ROOT="$ANDROID_SDK_ROOT/ndk/23.2.8568313"
+
           export CFLAGS="-I$OBOE_INCLUDE_DIR"
           export CXXFLAGS="-I$OBOE_INCLUDE_DIR"
           export LDFLAGS="-L$OBOE_LIB_DIR"
@@ -111,24 +172,36 @@ jobs:
           test -d android_project
           test -d android_project/mainAssets
 
-      - name: Bundle Oracle of Runes into APK assets
+      - name: Bundle Oracle of Runes files
         shell: bash
         run: |
           ASSET_DIR="scummvm-src/android_project/mainAssets/src/main/assets/oracle-runes-game"
 
           mkdir -p "$ASSET_DIR"
 
-          cp game_data/runes7.dxr "$ASSET_DIR/"
-          cp game_data/Runes.dat "$ASSET_DIR/"
-          cp game_data/Runes.skr "$ASSET_DIR/"
+          cp \
+            game_data/runes7.dxr \
+            "$ASSET_DIR/"
 
+          cp \
+            game_data/Runes.dat \
+            "$ASSET_DIR/"
+
+          cp \
+            game_data/Runes.skr \
+            "$ASSET_DIR/"
+
+          echo "Game assets:"
           ls -lah "$ASSET_DIR"
 
       - name: Build APK
         working-directory: scummvm-src/android_project
         shell: bash
         run: |
-          printf 'sdk.dir=%s\n' "$ANDROID_SDK_ROOT" > local.properties
+          printf \
+            'sdk.dir=%s\n' \
+            "$ANDROID_SDK_ROOT" \
+            > local.properties
 
           chmod +x gradlew
 
@@ -151,18 +224,28 @@ jobs:
             exit 1
           fi
 
-          echo "APK_PATH=$APK_PATH" >> "$GITHUB_ENV"
+          echo "APK found:"
+          echo "$APK_PATH"
+
+          echo \
+            "APK_PATH=$APK_PATH" \
+            >> "$GITHUB_ENV"
 
       - name: Collect APK
         shell: bash
         run: |
           mkdir -p output
-          cp "$APK_PATH" output/Oracle-of-Runes-DIRECT.apk
+
+          cp \
+            "$APK_PATH" \
+            output/Oracle-of-Runes-direct.apk
+
+          ls -lah output
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Oracle-of-Runes-DIRECT
-          path: output/Oracle-of-Runes-DIRECT.apk
+          name: Oracle-of-Runes-XTRA-FIX
+          path: output/Oracle-of-Runes-direct.apk
           if-no-files-found: error
           retention-days: 7
