@@ -10,14 +10,49 @@ on:
 jobs:
   inspect:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
-      - name: Extract relevant Director strings
+
+      - name: Install host build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential git pkg-config libsdl2-dev libpng-dev zlib1g-dev libjpeg-dev libfreetype6-dev xvfb
+
+      - name: Build host ScummVM Director only
+        run: |
+          git clone --depth 1 https://github.com/scummvm/scummvm.git scummvm-host
+          cd scummvm-host
+          ./configure --disable-all-engines --enable-engine=director --disable-debug
+          make -j2
+
+      - name: Dump Oracle Lingo scripts
         shell: bash
         run: |
-          echo '===== MATCHED DIRECTOR STRINGS ====='
-          strings -a -n 3 game_data/runes7.dxr \
-            | grep -Eai 'mouse(up|down)|puzzle|behavior|click|go to|go frame|frame|script|member|letter|rune|new|play|movie' \
-            | head -n 1200 || true
-          echo '===== ALL NEARBY ASCII CANDIDATES ====='
-          strings -a -n 5 game_data/runes7.dxr | head -n 2500 || true
+          mkdir -p dumps
+          cat > scummvm.ini <<EOF
+          [scummvm]
+          dump_scripts=true
+          confirm_exit=false
+
+          [orunes]
+          engineid=director
+          gameid=director
+          path=$GITHUB_WORKSPACE/game_data
+          platform=windows
+          version=702
+          start_movie=runes7.dxr
+          EOF
+          timeout 25s xvfb-run -a ./scummvm-host/scummvm --config="$GITHUB_WORKSPACE/scummvm.ini" --dump-scripts orunes || true
+          echo '===== DUMP FILES ====='
+          find dumps -type f -maxdepth 2 -print || true
+          echo '===== MOUSEUP / PUZZLE LINGO ====='
+          grep -RniE 'mouseUp|mouseDown|PUZZLE|puzzle|go to|go frame|play frame|select|NEW|RST' dumps --include='*.lingo' -C 12 || true
+
+      - name: Upload script dumps
+        uses: actions/upload-artifact@v4
+        with:
+          name: oracle-lingo-dumps
+          path: dumps
+          if-no-files-found: warn
+          retention-days: 7
