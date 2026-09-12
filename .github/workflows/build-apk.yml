@@ -9,6 +9,7 @@ on:
       - 'patch_scummvm.py'
       - 'patch_diagnostics.py'
       - 'patch_primary_handler.py'
+      - 'patch_mouse_position.py'
       - '.github/workflows/build-apk.yml'
       - 'game_data/**'
 
@@ -52,10 +53,11 @@ jobs:
       - name: Patch Oracle of Runes
         shell: bash
         run: |
-          python3 -m py_compile patch_scummvm.py patch_diagnostics.py patch_primary_handler.py
+          python3 -m py_compile patch_scummvm.py patch_diagnostics.py patch_primary_handler.py patch_mouse_position.py
           python3 patch_scummvm.py scummvm-src
           python3 patch_diagnostics.py scummvm-src
           python3 patch_primary_handler.py scummvm-src
+          python3 patch_mouse_position.py scummvm-src
 
       - name: Verify Oracle patch
         shell: bash
@@ -68,6 +70,9 @@ jobs:
           grep -n 'ORACLE_RUNES_CLICK_DIAGNOSTIC' scummvm-src/engines/director/events.cpp
           grep -n 'ORACLE_RUNES_PRIMARY_HANDLER_NAME_FIX' scummvm-src/engines/director/lingo/lingo-events.cpp
           grep -n 'SPUZZ()' scummvm-src/engines/director/lingo/lingo-events.cpp
+          grep -n 'ORACLE_RUNES_TOUCH_MOUSE_POSITION_FIX' scummvm-src/engines/director/lingo/lingo-the.cpp
+          grep -n '_lastMousePos.x' scummvm-src/engines/director/lingo/lingo-the.cpp
+          grep -n '_lastMousePos.y' scummvm-src/engines/director/lingo/lingo-the.cpp
           echo "PATCH VERIFIED"
 
       - name: Clone Oboe
@@ -143,12 +148,12 @@ jobs:
           test -n "$APK_PATH"
           test -f "$APK_PATH"
           mkdir -p output
-          cp "$APK_PATH" output/Oracle-of-Runes-spuzz-fix.apk
+          cp "$APK_PATH" output/Oracle-of-Runes-touch-mouse-fix.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Oracle-of-Runes-SPUZZ-FIX
-          path: output/Oracle-of-Runes-spuzz-fix.apk
+          name: Oracle-of-Runes-TOUCH-MOUSE-FIX
+          path: output/Oracle-of-Runes-touch-mouse-fix.apk
           if-no-files-found: error
           retention-days: 7
