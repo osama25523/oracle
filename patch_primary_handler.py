@@ -9,8 +9,9 @@ root = Path(sys.argv[1]).resolve()
 lingo_events_cpp = root / "engines" / "director" / "lingo" / "lingo-events.cpp"
 lingo_code_cpp = root / "engines" / "director" / "lingo" / "lingo-code.cpp"
 builtins_cpp = root / "engines" / "director" / "lingo" / "lingo-builtins.cpp"
+lingo_funcs_cpp = root / "engines" / "director" / "lingo" / "lingo-funcs.cpp"
 
-for p in (lingo_events_cpp, lingo_code_cpp, builtins_cpp):
+for p in (lingo_events_cpp, lingo_code_cpp, builtins_cpp, lingo_funcs_cpp):
     if not p.exists():
         raise FileNotFoundError(str(p))
 
@@ -34,11 +35,6 @@ if marker not in src:
 \tmainArchive->primaryEventHandlers[event] = code;
 
 \t// ORACLE_RUNES_PRIMARY_HANDLER_NAME_FIX
-\t// Director accepts a bare custom-handler name in mouseDownScript/keyUpScript,
-\t// e.g. `set the mouseDownScript to "spuzz"`, and invokes that handler when
-\t// the event fires. The generic Lingo compiler can interpret a bare identifier
-\t// as a value instead of a zero-argument handler call. Make the intended call
-\t// explicit for Oracle of Runes while preserving the stored property string.
 \tCommon::String executableCode = code;
 \tif (event == kEventMouseDown && code.equalsIgnoreCase("spuzz"))
 \t\texecutableCode = "SPUZZ()";
@@ -51,20 +47,14 @@ if marker not in src:
 
     src = src.replace(old, new, 1)
     lingo_events_cpp.write_text(src, encoding="utf-8")
-    print("Applied Oracle mouseDownScript custom-handler fix.")
-else:
-    print("Oracle mouseDownScript custom-handler fix already present.")
 
 # -----------------------------------------------------------------------------
-# 2) One-shot diagnostic checkpoint: prove whether SPUZZ() is actually entered.
-#    The OSD also shows the mouseH/mouseV values Oracle should see and an inferred
-#    puzzle letter/number from the visible two-column puzzle grid.
+# 2) Keep a compact SPUZZ entry diagnostic.
 # -----------------------------------------------------------------------------
 code = lingo_code_cpp.read_text(encoding="utf-8")
 call_marker = "ORACLE_RUNES_SPUZZ_ENTRY_DIAGNOSTIC"
 
 if call_marker not in code:
-    # g_system/displayMessageOnOSD is used only by this diagnostic.
     if '#include "common/system.h"' not in code:
         include_anchor = '#include "graphics/macgui/macwindowmanager.h"'
         if include_anchor not in code:
@@ -76,33 +66,14 @@ if call_marker not in code:
     call_replacement = '''void LC::call(const Common::String &name, int nargs, bool allowRetVal) {
 \t// ORACLE_RUNES_SPUZZ_ENTRY_DIAGNOSTIC
 \tif (name.equalsIgnoreCase("spuzz")) {
-\t\tint oracleX = -1;
-\t\tint oracleY = -1;
 \t\tWindow *oracleWindow = g_director->getCurrentWindow();
 \t\tMovie *oracleMovie = oracleWindow ? oracleWindow->getCurrentMovie() : nullptr;
 \t\tif (oracleMovie) {
-\t\t\toracleX = oracleMovie->_lastMousePos.x;
-\t\t\t// This matches patch_mouse_position.py: SPUZZ sees mouseV as lastY + 1.
-\t\t\toracleY = oracleMovie->_lastMousePos.y + 1;
+\t\t\tint oracleX = oracleMovie->_lastMousePos.x;
+\t\t\tint oracleY = oracleMovie->_lastMousePos.y + 1;
+\t\t\tg_system->displayMessageOnOSD(Common::U32String::format(
+\t\t\t\t"SPUZZ ENTER / mouseH %d / mouseV %d", oracleX, oracleY));
 \t\t}
-
-\t\tint oraclePuzzle = 0;
-\t\tchar oracleLetter = '?';
-\t\tif (oracleX >= 0 && oracleY >= 82) {
-\t\t\t// Oracle's 13 rows are about 26 Director pixels apart; first row is A/N.
-\t\t\tint oracleRow = (oracleY - 82) / 26;
-\t\t\tif (oracleRow < 0)
-\t\t\t\toracleRow = 0;
-\t\t\tif (oracleRow > 12)
-\t\t\t\toracleRow = 12;
-\t\t\toraclePuzzle = (oracleX < 320) ? (oracleRow + 1) : (oracleRow + 14);
-\t\t\tif (oraclePuzzle >= 1 && oraclePuzzle <= 26)
-\t\t\t\toracleLetter = (char)('A' + oraclePuzzle - 1);
-\t\t}
-
-\t\tg_system->displayMessageOnOSD(Common::U32String::format(
-\t\t\t"SPUZZ ENTER / mouseH %d / mouseV %d / calc %c #%d",
-\t\t\toracleX, oracleY, oracleLetter, oraclePuzzle));
 \t}
 
 \tif (debugChannelSet(3, kDebugLingoExec))'''
@@ -111,14 +82,10 @@ if call_marker not in code:
         raise RuntimeError("Could not locate LC::call(name) implementation")
     code = code.replace(call_anchor, call_replacement, 1)
     lingo_code_cpp.write_text(code, encoding="utf-8")
-    print("Applied Oracle SPUZZ entry diagnostic.")
-else:
-    print("Oracle SPUZZ entry diagnostic already present.")
 
 # -----------------------------------------------------------------------------
-# 3) One-shot diagnostic checkpoint: if SPUZZ reaches `go`, show the exact values
-#    on the Lingo stack before ScummVM consumes them. This reveals the requested
-#    frame/movie target without changing normal execution.
+# 3) Keep go-target diagnostic. The user's #34 runtime proved Puzzle A reaches
+#    b_go with exactly one integer argument: 29.
 # -----------------------------------------------------------------------------
 builtins = builtins_cpp.read_text(encoding="utf-8")
 go_marker = "ORACLE_RUNES_GO_TARGET_DIAGNOSTIC"
@@ -128,66 +95,82 @@ if go_marker not in builtins:
 \t// Builtin function for go as used by the Director bytecode engine.'''
     go_replacement = '''void LB::b_go(int nargs) {
 \t// ORACLE_RUNES_GO_TARGET_DIAGNOSTIC
-\tCommon::String oracleArg0 = "<none>";
-\tCommon::String oracleArg1 = "<none>";
-\tif (nargs > 0)
-\t\toracleArg0 = g_lingo->peek(0).asString(true);
-\tif (nargs > 1)
-\t\toracleArg1 = g_lingo->peek(1).asString(true);
-
-\tint oracleX = -1;
-\tint oracleY = -1;
-\tWindow *oracleWindow = g_director->getCurrentWindow();
-\tMovie *oracleMovie = oracleWindow ? oracleWindow->getCurrentMovie() : nullptr;
-\tif (oracleMovie) {
-\t\toracleX = oracleMovie->_lastMousePos.x;
-\t\toracleY = oracleMovie->_lastMousePos.y + 1;
+\tif (nargs == 1) {
+\t\tDatum oracleTarget = g_lingo->peek(0);
+\t\tif (oracleTarget.type == INT)
+\t\t\tg_system->displayMessageOnOSD(Common::U32String::format(
+\t\t\t\t"ORACLE GO -> frame %d", oracleTarget.asInt()));
 \t}
-
-\tint oraclePuzzle = 0;
-\tchar oracleLetter = '?';
-\tif (oracleX >= 0 && oracleY >= 82) {
-\t\tint oracleRow = (oracleY - 82) / 26;
-\t\tif (oracleRow < 0)
-\t\t\toracleRow = 0;
-\t\tif (oracleRow > 12)
-\t\t\toracleRow = 12;
-\t\toraclePuzzle = (oracleX < 320) ? (oracleRow + 1) : (oracleRow + 14);
-\t\tif (oraclePuzzle >= 1 && oraclePuzzle <= 26)
-\t\t\toracleLetter = (char)('A' + oraclePuzzle - 1);
-\t}
-
-\tg_system->displayMessageOnOSD(Common::U32String::format(
-\t\t"SPUZZ -> GO / %c #%d / go[%s] [%s]",
-\t\toracleLetter, oraclePuzzle, oracleArg0.c_str(), oracleArg1.c_str()));
 
 \t// Builtin function for go as used by the Director bytecode engine.'''
-
     if go_anchor not in builtins:
         raise RuntimeError("Could not locate LB::b_go implementation")
     builtins = builtins.replace(go_anchor, go_replacement, 1)
     builtins_cpp.write_text(builtins, encoding="utf-8")
-    print("Applied Oracle go-target diagnostic.")
-else:
-    print("Oracle go-target diagnostic already present.")
 
 # -----------------------------------------------------------------------------
-# 4) Strong verification. If this script exits successfully, the next APK has
-#    all three useful states in one build:
-#      CLICK only      -> primary/SPUZZ path never ran
-#      SPUZZ ENTER     -> handler ran, but no `go` was reached
-#      SPUZZ -> GO     -> handler ran and we see its exact navigation target
+# 4) Oracle puzzle navigation fix.
+# Runtime #34 proved SPUZZ reaches `go 29` for Puzzle A but ScummVM stays on the
+# selector. ScummVM normally rejects all goto/play while
+# _disableGoPlayUpdateStage is set. For this dedicated Oracle build, allow the
+# known puzzle-frame range 29..54 to pass this guard, then use normal
+# Score::setCurrentFrame(). This preserves ScummVM's normal goto path while
+# preventing the guard from swallowing Oracle's puzzle selection.
+# -----------------------------------------------------------------------------
+funcs = lingo_funcs_cpp.read_text(encoding="utf-8")
+nav_marker = "ORACLE_RUNES_PUZZLE_GOTO_FIX"
+if nav_marker not in funcs:
+    old_guard = '''\tif (score->_disableGoPlayUpdateStage) {
+\t\twarning("Lingo::func_goto(): ignoring goto due to disableGoPlayUpdateStage flag");
+\t\treturn;
+\t}'''
+    new_guard = '''\t// ORACLE_RUNES_PUZZLE_GOTO_FIX
+\t// Oracle of Runes maps its A..Z selector to numeric score frames 29..54.
+\t// Do not let the temporary Director update-stage guard swallow those explicit
+\t// puzzle selections. All other goto/play calls keep upstream behavior.
+\tbool oraclePuzzleGoto = (movie.type == VOID && frame.type == INT && frame.asInt() >= 29 && frame.asInt() <= 54);
+\tif (score->_disableGoPlayUpdateStage && !oraclePuzzleGoto) {
+\t\twarning("Lingo::func_goto(): ignoring goto due to disableGoPlayUpdateStage flag");
+\t\treturn;
+\t}
+\tif (oraclePuzzleGoto && score->_disableGoPlayUpdateStage)
+\t\twarning("Oracle of Runes: allowing puzzle goto frame %d through update-stage guard", frame.asInt());'''
+    if old_guard not in funcs:
+        raise RuntimeError("Could not locate func_goto disableGoPlayUpdateStage guard")
+    funcs = funcs.replace(old_guard, new_guard, 1)
+
+    old_set = '''\t} else {
+\t\tdebugC(3, kDebugLingoExec, "Lingo::func_goto(): going to frame %d", frame.asInt());
+\t\tscore->setCurrentFrame(frame.asInt());
+\t}'''
+    new_set = '''\t} else {
+\t\tdebugC(3, kDebugLingoExec, "Lingo::func_goto(): going to frame %d", frame.asInt());
+\t\tscore->setCurrentFrame(frame.asInt());
+\t\tif (oraclePuzzleGoto)
+\t\t\tg_system->displayMessageOnOSD(Common::U32String::format(
+\t\t\t\t"ORACLE QUEUED PUZZLE FRAME %d", frame.asInt()));
+\t}'''
+    if old_set not in funcs:
+        raise RuntimeError("Could not locate numeric func_goto setCurrentFrame block")
+    funcs = funcs.replace(old_set, new_set, 1)
+    lingo_funcs_cpp.write_text(funcs, encoding="utf-8")
+
+# -----------------------------------------------------------------------------
+# 5) Strong verification.
 # -----------------------------------------------------------------------------
 events_check = lingo_events_cpp.read_text(encoding="utf-8")
 code_check = lingo_code_cpp.read_text(encoding="utf-8")
 builtins_check = builtins_cpp.read_text(encoding="utf-8")
+funcs_check = lingo_funcs_cpp.read_text(encoding="utf-8")
 checks = {
     "primary handler": marker in events_check and 'executableCode = "SPUZZ()"' in events_check,
     "SPUZZ entry": call_marker in code_check and "SPUZZ ENTER" in code_check,
-    "go target": go_marker in builtins_check and "SPUZZ -> GO" in builtins_check,
+    "go target": go_marker in builtins_check and "ORACLE GO -> frame" in builtins_check,
+    "puzzle goto guard": nav_marker in funcs_check and "oraclePuzzleGoto" in funcs_check,
+    "queued frame": "ORACLE QUEUED PUZZLE FRAME" in funcs_check,
 }
 failed = [name for name, ok in checks.items() if not ok]
 if failed:
-    raise RuntimeError("Oracle primary/diagnostic verification failed: " + ", ".join(failed))
+    raise RuntimeError("Oracle navigation verification failed: " + ", ".join(failed))
 
-print("ORACLE PRIMARY + SPUZZ + GO ONE-SHOT DIAGNOSTIC VERIFIED")
+print("ORACLE SPUZZ + PUZZLE FRAME NAVIGATION FIX VERIFIED")
