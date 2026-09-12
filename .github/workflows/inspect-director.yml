@@ -1,0 +1,23 @@
+name: Inspect Oracle Director Movie
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/inspect-director.yml'
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract relevant Director strings
+        shell: bash
+        run: |
+          echo '===== MATCHED DIRECTOR STRINGS ====='
+          strings -a -n 3 game_data/runes7.dxr \
+            | grep -Eai 'mouse(up|down)|puzzle|behavior|click|go to|go frame|frame|script|member|letter|rune|new|play|movie' \
+            | head -n 1200 || true
+          echo '===== ALL NEARBY ASCII CANDIDATES ====='
+          strings -a -n 5 game_data/runes7.dxr | head -n 2500 || true
