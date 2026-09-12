@@ -20,6 +20,13 @@ jobs:
       - name: Checkout builder
         uses: actions/checkout@v4
 
+      - name: Inspect Oracle Director movie strings
+        shell: bash
+        run: |
+          echo '===== ORACLE DIRECTOR SCRIPT STRINGS ====='
+          strings -a -n 4 game_data/runes7.dxr | grep -Eai 'mouse(up|down)|puzzle|behavior|click|go to|go frame|frame|script|member|new|letter|run(e|es)' | head -n 600 || true
+          echo '===== END ORACLE DIRECTOR SCRIPT STRINGS ====='
+
       - name: Set up Java 17
         uses: actions/setup-java@v5
         with:
