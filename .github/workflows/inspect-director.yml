@@ -44,15 +44,21 @@ jobs:
           start_movie=runes7.dxr
           EOF
           timeout 25s xvfb-run -a ./scummvm-host/scummvm --config="$GITHUB_WORKSPACE/scummvm.ini" --dump-scripts orunes || true
-          echo '===== DUMP FILES ====='
-          find dumps -type f -maxdepth 2 -print || true
-          echo '===== MOUSEUP / PUZZLE LINGO ====='
-          grep -RniE 'mouseUp|mouseDown|PUZZLE|puzzle|go to|go frame|play frame|select|NEW|RST' dumps --include='*.lingo' -C 12 || true
+          echo '===== SPUZZ REFERENCES ====='
+          grep -RniE 'spuzz|SPUZZ' dumps --include='*.lingo' -C 50 || true
+          echo '===== SELECT SCREEN CORE SCRIPTS ====='
+          for f in $(find dumps -type f \( -name '*BehaviorScript-69.lingo' -o -name '*BehaviorScript-77.lingo' -o -name '*MovieScript-74.lingo' \)); do
+            echo "===== $f ====="
+            cat "$f"
+          done
+          echo '===== ALL HANDLERS CONTAINING PUZZ ====='
+          grep -RniE '^on |PUZZ|mouseDownScript|mouseUpScript' dumps --include='*.lingo' -C 8 | head -n 5000 || true
+          tar -czf oracle-lingo-dumps.tar.gz $(find dumps -type f -name '*.lingo') || true
 
       - name: Upload script dumps
         uses: actions/upload-artifact@v4
         with:
           name: oracle-lingo-dumps
-          path: dumps
+          path: oracle-lingo-dumps.tar.gz
           if-no-files-found: warn
           retention-days: 7
