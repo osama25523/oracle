@@ -13,74 +13,73 @@ if not path.exists():
 
 src = path.read_text(encoding="utf-8")
 base_marker = "ORACLE_RUNES_SAFE_PUZZLE_GOTO_FIX"
+stock_marker = "ORACLE_RUNES_STOCK_GOTO_BYPASS_GUARD"
 always_marker = "ORACLE_RUNES_ALWAYS_QUEUE_PUZZLE_GOTO"
-direct_marker = "ORACLE_RUNES_DIRECT_PUZZLE_JUMP"
 setup_marker = "ORACLE_RUNES_DEFER_SETUP_FRAME_4"
 
 # patch_primary_handler.py runs immediately before this script on a fresh
-# ScummVM checkout. It inserts ORACLE_RUNES_SAFE_PUZZLE_GOTO_FIX. Replace that
-# entire temporary guarded block in one pass instead of depending on the exact
-# text produced by an older build (#44).
-if direct_marker not in src:
+# ScummVM checkout. It adds a temporary queue workaround around func_goto.
+# Replace that workaround with a much smaller compatibility rule: Oracle's
+# puzzle setup jumps are allowed through ScummVM's update-stage guard, then
+# the rest of the ORIGINAL func_goto executes unchanged. This preserves the
+# normal Director semantics: _skipFrameAdvance, Lingo freeze, setCurrentFrame,
+# and killScriptInstances all happen in their stock order.
+if stock_marker not in src:
     pattern = re.compile(
         r'\t// ORACLE_RUNES_SAFE_PUZZLE_GOTO_FIX\n'
         r'\tbool oraclePuzzleGoto = \(movie\.type == VOID && frame\.type == INT && frame\.asInt\(\) >= 29 && frame\.asInt\(\) <= 54\);\n'
         r'.*?'
-        r'\tif \(score->_disableGoPlayUpdateStage\) \{',
+        r'\tif \(score->_disableGoPlayUpdateStage\) \{\n'
+        r'\t\twarning\("Lingo::func_goto\(\): ignoring goto due to disableGoPlayUpdateStage flag"\);\n'
+        r'\t\treturn;\n'
+        r'\t\}\n',
         re.DOTALL,
     )
 
     replacement = '''\t// ORACLE_RUNES_SAFE_PUZZLE_GOTO_FIX
 \tbool oraclePuzzleGoto = (movie.type == VOID && frame.type == INT && frame.asInt() >= 29 && frame.asInt() <= 54);
+\t// ORACLE_RUNES_DEFER_SETUP_FRAME_4
+\tbool oracleSetupGoto4 = (movie.type == VOID && frame.type == INT && frame.asInt() == 4 &&
+\t\tscore->getCurrentFrameNum() >= 29 && score->getCurrentFrameNum() <= 54);
+\tbool oracleAllowedGuardedGoto = oraclePuzzleGoto || oracleSetupGoto4;
 
 \t// ORACLE_RUNES_ALWAYS_QUEUE_PUZZLE_GOTO
-\t// ORACLE_RUNES_DIRECT_PUZZLE_JUMP
-\t// SPUZZ already resolves A..Z to frames 29..54 correctly. Apply that
-\t// jump using stock Director goto mechanics except for freezing SPUZZ.
-\t// Freezing the selector handler caused it to re-enter after the frame
-\t// change, repeatedly issuing go 29 and producing the visible flicker.
-\tif (oraclePuzzleGoto) {
-\t\tstage->_skipFrameAdvance = true;
-\t\tscore->setCurrentFrame(frame.asInt());
-\t\tscore->killScriptInstances(score->getNextFrame());
+\t// ORACLE_RUNES_STOCK_GOTO_BYPASS_GUARD
+\tif (score->_disableGoPlayUpdateStage && !oracleAllowedGuardedGoto) {
+\t\twarning("Lingo::func_goto(): ignoring goto due to disableGoPlayUpdateStage flag");
+\t\treturn;
+\t}
+
+\tif (oracleAllowedGuardedGoto) {
 \t\tg_system->displayMessageOnOSD(Common::U32String::format(
-\t\t\t"ORACLE DIRECT PUZZLE -> %d", frame.asInt()));
-\t\treturn;
+\t\t\t"ORACLE STOCK GOTO -> %d", frame.asInt()));
 \t}
-
-\t// ORACLE_RUNES_DEFER_SETUP_FRAME_4
-\t// Puzzle setup frames can issue go 4 while prepareFrame has the normal
-\t// ScummVM update-stage guard enabled. Preserve that request for the next
-\t// safe Score update, but do not freeze the setup script.
-\tif (score->_disableGoPlayUpdateStage && movie.type == VOID && frame.type == INT && frame.asInt() == 4) {
-\t\tstage->_skipFrameAdvance = true;
-\t\tscore->oracleQueuePuzzleFrame(4);
-\t\tg_system->displayMessageOnOSD(Common::U32String("ORACLE DEFER GOTO 4"));
-\t\treturn;
-\t}
-
-\tif (score->_disableGoPlayUpdateStage) {'''
+'''
 
     src, count = pattern.subn(replacement, src, count=1)
     if count != 1:
-        raise RuntimeError("Could not locate fresh Oracle safe puzzle goto block")
+        raise RuntimeError("Could not locate Oracle temporary goto workaround block")
 
 path.write_text(src, encoding="utf-8")
 
 check = path.read_text(encoding="utf-8")
 required = {
     "base marker": base_marker,
-    "always marker": always_marker,
-    "direct jump marker": direct_marker,
+    "stock goto marker": stock_marker,
+    "workflow compatibility marker": always_marker,
     "setup frame marker": setup_marker,
-    "direct target": "score->setCurrentFrame(frame.asInt())",
-    "kill old instances": "score->killScriptInstances(score->getNextFrame())",
-    "setup queue": "score->oracleQueuePuzzleFrame(4)",
-    "direct diagnostic": "ORACLE DIRECT PUZZLE",
-    "setup diagnostic": "ORACLE DEFER GOTO 4",
+    "puzzle range": "frame.asInt() >= 29 && frame.asInt() <= 54",
+    "setup source range": "score->getCurrentFrameNum() >= 29",
+    "stock diagnostic": "ORACLE STOCK GOTO",
+    "stock freeze": "_freezeState = true",
+    "stock frame assignment": "score->setCurrentFrame(frame.asInt())",
+    "stock instance cleanup": "score->killScriptInstances(score->getNextFrame())",
 }
 missing = [name for name, text in required.items() if text not in check]
 if missing:
-    raise RuntimeError("Oracle direct puzzle patch verification failed: " + ", ".join(missing))
+    raise RuntimeError("Oracle stock goto compatibility verification failed: " + ", ".join(missing))
 
-print("ORACLE DIRECT PUZZLE JUMP + NONFROZEN SETUP GOTO VERIFIED")
+if "ORACLE DIRECT PUZZLE" in check or "ORACLE DEFER GOTO 4" in check:
+    raise RuntimeError("Old direct/deferred Oracle goto workaround is still present")
+
+print("ORACLE STOCK DIRECTOR GOTO SEMANTICS VERIFIED")
