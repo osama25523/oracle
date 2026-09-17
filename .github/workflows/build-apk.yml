@@ -9,6 +9,7 @@ on:
       - 'patch_scummvm.py'
       - 'patch_diagnostics.py'
       - 'patch_primary_handler.py'
+      - 'patch_puzzle_queue_always.py'
       - 'patch_mouse_position.py'
       - '.github/workflows/build-apk.yml'
       - 'game_data/**'
@@ -53,10 +54,11 @@ jobs:
       - name: Patch Oracle of Runes
         shell: bash
         run: |
-          python3 -m py_compile patch_scummvm.py patch_diagnostics.py patch_primary_handler.py patch_mouse_position.py
+          python3 -m py_compile patch_scummvm.py patch_diagnostics.py patch_primary_handler.py patch_puzzle_queue_always.py patch_mouse_position.py
           python3 patch_scummvm.py scummvm-src
           python3 patch_diagnostics.py scummvm-src
           python3 patch_primary_handler.py scummvm-src
+          python3 patch_puzzle_queue_always.py scummvm-src
           python3 patch_mouse_position.py scummvm-src
 
       - name: Verify Oracle patch
@@ -70,6 +72,7 @@ jobs:
           grep -n 'ORACLE_RUNES_CLICK_DIAGNOSTIC' scummvm-src/engines/director/events.cpp
           grep -n 'ORACLE_RUNES_PRIMARY_HANDLER_NAME_FIX' scummvm-src/engines/director/lingo/lingo-events.cpp
           grep -n 'SPUZZ()' scummvm-src/engines/director/lingo/lingo-events.cpp
+          grep -n 'ORACLE_RUNES_ALWAYS_QUEUE_PUZZLE_GOTO' scummvm-src/engines/director/lingo/lingo-funcs.cpp
           grep -n 'ORACLE_RUNES_TOUCH_MOUSE_POSITION_FIX' scummvm-src/engines/director/lingo/lingo-the.cpp
           grep -n '_lastMousePos.x' scummvm-src/engines/director/lingo/lingo-the.cpp
           grep -n '_lastMousePos.y' scummvm-src/engines/director/lingo/lingo-the.cpp
