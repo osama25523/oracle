@@ -67,6 +67,12 @@ jobs:
           sed -i 's/version = release(37)/version = release(36)/' scummvm-src/dists/android/build.gradle
           grep -n 'version = release(36)' scummvm-src/dists/android/build.gradle
 
+          JAVA_FILE="scummvm-src/backends/platform/android/org/scummvm/scummvm/ScummVMActivity.java"
+          grep -n 'CINNAMON_BUN\|ACCESS_LOCAL_NETWORK' "$JAVA_FILE"
+          sed -i 's/Build\.VERSION_CODES\.CINNAMON_BUN/37/g' "$JAVA_FILE"
+          sed -i 's/Manifest\.permission\.ACCESS_LOCAL_NETWORK/"android.permission.ACCESS_LOCAL_NETWORK"/g' "$JAVA_FILE"
+          grep -n 'android.permission.ACCESS_LOCAL_NETWORK' "$JAVA_FILE"
+
       - name: Patch Oracle of Runes
         shell: bash
         run: |
