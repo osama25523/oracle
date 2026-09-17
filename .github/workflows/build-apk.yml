@@ -52,13 +52,20 @@ jobs:
           echo "Using sdkmanager: $SDKMANAGER"
 
           yes | "$SDKMANAGER" --licenses >/dev/null || true
-          "$SDKMANAGER" "platform-tools" "platforms;android-37" "build-tools;37.0.0" "ndk;23.2.8568313"
+          "$SDKMANAGER" "platform-tools" "platforms;android-36" "build-tools;36.0.0" "ndk;23.2.8568313"
 
           echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/23.2.8568313" >> "$GITHUB_ENV"
           test -d "$ANDROID_SDK_ROOT/ndk/23.2.8568313"
 
       - name: Clone ScummVM
         run: git clone --depth 1 https://github.com/scummvm/scummvm.git scummvm-src
+
+      - name: Pin ScummVM Android compile SDK to 36
+        shell: bash
+        run: |
+          grep -n 'version = release(37)' scummvm-src/dists/android/build.gradle
+          sed -i 's/version = release(37)/version = release(36)/' scummvm-src/dists/android/build.gradle
+          grep -n 'version = release(36)' scummvm-src/dists/android/build.gradle
 
       - name: Patch Oracle of Runes
         shell: bash
